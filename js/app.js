@@ -189,6 +189,7 @@
     (d.exercises || []).forEach((ex, i) => {
       for (const e of expand(ex)) steps.push({ type: 'ex', ex: e, key: e.key || ('d' + day + ':e' + i), day });
     });
+    steps.push({ type: 'extras', day, done: {} });
     return steps;
   }
 
@@ -223,8 +224,10 @@
     const foot = h('div', { class: 'lesson-foot' });
     app.replaceChildren(h('div', { class: 'screen lesson' }, head, body, foot));
 
+    if (L.keyHandler) { document.removeEventListener('keydown', L.keyHandler); L.keyHandler = null; }
     if (L.i >= total) return renderSummary(body, foot);
     const step = L.steps[L.i];
+    if (step.type === 'extras') return renderExtras(body, foot, step);
     const nextBtn = (label) => h('button', { class: 'btn primary big', type: 'button', onclick: () => { L.i++; renderLessonStep(); } }, label || 'Дальше');
 
     if (step.type === 'section') {
@@ -251,6 +254,15 @@
       });
       inst.el.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey && !checkBtn.disabled && !checkBtn.hidden) { e.preventDefault(); doCheck(); } });
       if (inst.focus) setTimeout(() => inst.focus(), 50);
+      // горячие клавиши для карточек: пробел — показать ответ, 1 — не помню, 2 — помню
+      L.keyHandler = (e) => {
+        if (e.target && /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName)) return;
+        if (e.key === ' ') { const b = body.querySelector('.anki-front .btn:not([hidden])'); if (b) { e.preventDefault(); b.click(); } }
+        else if (e.key === '1') { const b = body.querySelector('.rate-again:not(:disabled)'); if (b) b.click(); }
+        else if (e.key === '2') { const b = body.querySelector('.rate-good:not(:disabled)'); if (b) b.click(); }
+        else if (/^[1-4]$/.test(e.key)) { const opts = body.querySelectorAll('.opt:not(:disabled)'); const o = opts[Number(e.key) - 1]; if (o && !body.querySelector('.anki-rate')) o.click(); }
+      };
+      document.addEventListener('keydown', L.keyHandler);
       let checked = false;
       function doCheck() {
         if (checked) return; checked = true;
@@ -271,7 +283,7 @@
         Store.save();
         const fb = h('div', { class: 'feedback ' + (r.correct ? 'ok' : 'bad') },
           h('b', null, r.correct ? (r.accent ? 'Почти! Проверь ударения: ' : '¡Correcto!') : 'Не совсем.'),
-          r.answerText && (!r.correct || r.accent) ? h('div', { class: 'fb-ans' }, r.answerText) : null,
+          r.answerText && (!r.correct || r.accent || r.pairsStats) ? h('div', { class: 'fb-ans' }, r.answerText) : null,
           step.ex.e ? h('div', { class: 'fb-exp' }, step.ex.e) : null,
           step.ex.say || (step.ex.t === 'order' || step.ex.t === 'dict' || step.ex.t === 'tr') ? speakBtn(step.ex.say || step.ex.s || (step.ex.a && step.ex.a[0]), '🔊 Прослушать') : null
         );
@@ -283,12 +295,12 @@
     }
   }
 
-  function renderSummary(body, foot) {
+  function finishLesson() {
     const L = lesson;
     const secs = Math.min(40 * 60, Math.round((Date.now() - L.start) / 1000));
     const score = L.total ? Math.round((L.correct / L.total) * 100) : 100;
     if (!L.saved) {
-      L.saved = true;
+      L.saved = true; L.frozen = { score, secs, correct: L.correct, total: L.total };
       if (L.day) {
         Store.completeDay(L.day, score, secs);
         wordsOfDay(L.day).forEach((w) => Store.srsIntroduce(w.id));
@@ -298,13 +310,90 @@
         if (L.onDone) L.onDone(L);
       }
     }
+    return L.frozen;
+  }
+
+  // ---- необязательные блоки после урока ----
+  const MODULE_TENSES = { 1: ['pres', 'indef', 'imperf'], 2: ['perf', 'plusc'], 3: ['fut', 'cond'], 4: ['subj'], 5: ['subj', 'imp'], 6: ['subjImp', 'cond'], 7: ['indef', 'subj'], 8: ['pres', 'perf'], 9: ['subj', 'cond'], 10: ['subj', 'subjImp', 'indef'] };
+  function extraConj(day) {
+    const d = ST_DATA.days[day]; const m = moduleOf(day);
+    const conjs = (d.exercises || []).filter((e) => e.t === 'conj');
+    let verbs = [...new Set(conjs.flatMap((e) => e.verbs))];
+    let tenses = [...new Set(conjs.flatMap((e) => e.tenses))];
+    if (!verbs.length) verbs = wordsOfDay(day).map((w) => w.es).filter((v) => /^[a-záéíóúñ]+(ar|er|ir)$/.test(v)).slice(0, 4);
+    if (!verbs.length) verbs = ['tener', 'hacer', 'poder', 'decir', 'ir'];
+    if (!tenses.length) tenses = MODULE_TENSES[m.id] || ['pres'];
+    return expand({ t: 'conj', verbs, tenses, n: 5 }).map((e) => ({ type: 'ex', ex: e, key: e.key, day }));
+  }
+  function mistakesByDay() {
+    const st = Store.get(); const by = {};
+    for (const k in st.mistakes) { const m = st.mistakes[k]; by[m.day] = (by[m.day] || 0) + m.count; }
+    return by;
+  }
+  function extraInterleave(day) {
+    const st = Store.get(); const by = mistakesByDay();
+    const days = []; for (let d = 1; d < day; d++) if (st.days[d] && !ST_DATA.days[d].review) days.push(d);
+    if (!days.length) for (let d = 1; d < day; d++) if (!ST_DATA.days[d].review) days.push(d);
+    if (!days.length) return [];
+    // слабые темы встречаются чаще
+    const weighted = days.flatMap((d) => Array(1 + Math.min(3, by[d] || 0)).fill(d));
+    const out = []; const used = new Set();
+    for (let tries = 0; tries < 30 && out.length < 3; tries++) {
+      const d = weighted[Math.floor(Math.random() * weighted.length)];
+      const exs = ST_DATA.days[d].exercises.map((e, i) => ({ e, i })).filter((x) => x.e.t !== 'conj' && x.e.t !== 'match' && x.e.t !== 'dict');
+      const pickd = exs[Math.floor(Math.random() * exs.length)];
+      const key = 'd' + d + ':e' + pickd.i; if (used.has(key)) continue; used.add(key);
+      out.push({ type: 'ex', ex: Object.assign({}, pickd.e, { hint: (pickd.e.hint ? pickd.e.hint + ' · ' : '') + 'день ' + d + ': ' + ST_DATA.days[d].title }), key, day: d });
+    }
+    return out;
+  }
+  function extraShadow(day) {
+    const vocab = wordsOfDay(day).filter((w) => w.ex);
+    let items = vocab.slice(0, 3).map((w) => ({ s: w.ex, ru: w.es + ' — ' + w.ru }));
+    if (!items.length) items = (ST_DATA.days[day].exercises || []).filter((e) => e.t === 'dict').map((e) => ({ s: e.s, ru: e.ru }));
+    return items.map((it) => ({ type: 'ex', ex: { t: 'shadow', s: it.s, ru: it.ru } }));
+  }
+  function extraPairs(day) {
+    let words = wordsOfDay(day).map((w) => ({ es: w.es, ru: w.ru }));
+    if (words.length < 6) words = Cards.pairsPool('learning');
+    return Cards.pairsSteps(words, 1, 6);
+  }
+  function renderExtras(body, foot, step) {
+    const L = lesson; const F = finishLesson();
+    const ex = ST_DATA.extras[step.day];
+    const blocks = [
+      ['conj', 'Спряжения', '5 форм по теме дня, ≈2 мин', () => extraConj(step.day)],
+      ['mix', 'Задания из прошлых тем', '3 задания, чаще из слабых тем, ≈3 мин', () => extraInterleave(step.day)],
+      ['write', 'Мини-письмо', 'напиши 2–3 предложения и сравни с образцом, ≈4 мин', () => ex ? [{ type: 'ex', ex: { t: 'write', q: ex.q, sample: ex.sample } }] : []],
+      ['shadow', 'Произношение', 'повтори вслух 3 фразы' + (Engine.canListen() ? ', с проверкой микрофоном' : '') + ', ≈2 мин', () => extraShadow(step.day)],
+      ['pairs', 'Найди пары', 'один раунд на словах дня, ≈1 мин', () => extraPairs(step.day)]
+    ];
+    body.append(h('div', { class: 'card' },
+      h('div', { class: 'card-kicker' }, 'Урок засчитан: ' + F.score + '%'),
+      h('h2', null, 'Дополнительно, по желанию'),
+      h('p', { class: 'muted' }, 'Эти блоки не обязательны и не меняют результат урока. Каждый занимает пару минут; можно сделать один, все или ни одного.'),
+      h('div', { class: 'extras' }, blocks.map(([id, title, desc, build]) => h('button', { type: 'button', class: 'extra' + (step.done[id] ? ' done' : ''), disabled: step.done[id] ? '' : null, onclick: () => {
+        const stepsToAdd = build();
+        if (!stepsToAdd.length) { toast('Для этого дня блок недоступен'); return; }
+        step.done[id] = true;
+        L.steps.splice(L.i + 1, 0, ...stepsToAdd, step);
+        L.i++; renderLessonStep();
+      } }, h('b', null, (step.done[id] ? '✓ ' : '') + title), h('span', null, desc))))
+    ));
+    foot.append(h('button', { class: 'btn primary big', type: 'button', onclick: () => { L.i = L.steps.length; renderLessonStep(); } }, Object.keys(step.done).length ? 'К итогам урока' : 'Пропустить и перейти к итогам'));
+  }
+
+  function renderSummary(body, foot) {
+    const L = lesson;
+    const F = finishLesson();
+    const secs = F.secs; const score = F.score;
     const st = Store.get();
     const nd = nextDay();
     const msg = score >= 90 ? '¡Excelente!' : score >= 70 ? '¡Muy bien!' : score >= 50 ? 'Неплохо, но стоит повторить.' : 'Сложно? Прорешай ошибки и вернись к уроку.';
     body.append(h('div', { class: 'card center summary' },
       h('div', { class: 'score' }, score + '%'), h('h2', null, msg),
       h('div', { class: 'hero-row' },
-        h('div', { class: 'stat' }, h('b', null, L.correct + '/' + L.total), h('span', null, 'верно')),
+        h('div', { class: 'stat' }, h('b', null, F.correct + '/' + F.total), h('span', null, 'верно')),
         h('div', { class: 'stat' }, h('b', null, fmtTime(secs)), h('span', null, 'время')),
         h('div', { class: 'stat' }, h('b', null, Store.currentStreak()), h('span', null, '🔥 серия')),
         h('div', { class: 'stat' }, h('b', null, st.xp), h('span', null, '⭐ очков'))),
@@ -402,6 +491,19 @@
       h('p', { class: 'muted' }, 'Ответов: ' + st.stats.answered + ', верных: ' + st.stats.correct + (st.stats.answered ? ' (' + Math.round((st.stats.correct / st.stats.answered) * 100) + '%)' : '') + '. Начало курса: ' + (st.startDate || 'ещё не начат') + '.'),
       heat(st)
     ));
+
+    // слабые темы
+    const by = mistakesByDay();
+    const weak = Object.keys(by).map((d) => ({ d: Number(d), n: by[d] })).filter((x) => ST_DATA.days[x.d]).sort((a, b) => b.n - a.n).slice(0, 5);
+    if (weak.length) frag.append(h('section', { class: 'card' }, h('h3', null, 'Слабые темы'),
+      h('p', { class: 'muted small' }, 'Дни, где больше всего ошибок. Прорешай упражнения с ошибками из этого дня или пройди урок заново из плана.'),
+      h('ul', { class: 'weak' }, weak.map((x) => h('li', null, h('span', null, 'День ' + x.d + ': ' + ST_DATA.days[x.d].title, h('span', { class: 'muted' }, ' · ' + plural(x.n, 'ошибка', 'ошибки', 'ошибок'))),
+        h('button', { class: 'btn', type: 'button', onclick: () => {
+          const keys = Object.keys(st.mistakes).filter((k) => st.mistakes[k].day === x.d);
+          const steps = keys.map((k) => { const ex = findExercise(k); return ex ? { type: 'ex', ex, key: k, day: x.d } : null; }).filter(Boolean);
+          if (!steps.length) { toast('Нет упражнений'); return; }
+          startCustomLesson('День ' + x.d + ': работа над ошибками', shuffle(steps));
+        } }, 'Прорешать'))))));
 
     // экспорт / импорт
     const codeArea = h('textarea', { class: 'inp wide mono', rows: '3', placeholder: 'Сюда можно вставить код прогресса с другого устройства' });

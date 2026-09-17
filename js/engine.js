@@ -254,6 +254,89 @@
     };
   };
 
+  // ---- распознавание речи (только там, где браузер умеет; обычно требует интернет) ----
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  function canListen() { return !!SR; }
+  function listen(cb) {
+    try {
+      const r = new SR(); r.lang = 'es-ES'; r.interimResults = false; r.maxAlternatives = 3;
+      let done = false;
+      r.onresult = (e) => { done = true; cb(null, Array.from(e.results[0]).map((a) => a.transcript)); };
+      r.onerror = (e) => { if (!done) { done = true; cb(e.error || 'error'); } };
+      r.onend = () => { if (!done) { done = true; cb('no-speech'); } };
+      r.start(); return r;
+    } catch (e) { cb('unavailable'); return null; }
+  }
+  function similarity(a, b) {
+    const ta = stripAccents(norm(a)).split(' ').filter(Boolean), tb = stripAccents(norm(b)).split(' ').filter(Boolean);
+    if (!ta.length || !tb.length) return 0;
+    const used = new Set(); let common = 0;
+    for (const w of ta) { const i = tb.findIndex((x, k) => x === w && !used.has(k)); if (i >= 0) { used.add(i); common++; } }
+    return (2 * common) / (ta.length + tb.length);
+  }
+
+  // Мини-письмо: свободный ответ, затем образец и самооценка
+  types.write = function (ex) {
+    let rating = null;
+    const inp = h('textarea', { class: 'inp wide', rows: '4', autocapitalize: 'off', spellcheck: 'false', placeholder: 'Напиши 2–3 предложения…' });
+    const sample = h('div', { class: 'sample', hidden: '' }, h('div', { class: 'ex-label' }, 'Образец'), h('div', { class: 'sample-text' }, ex.sample, speakBtn(ex.sample)),
+      h('p', { class: 'muted small' }, 'Сравни своё с образцом: грамматика, порядок слов, окончания. Оцени себя честно.'),
+      h('div', { class: 'anki-rate' }, h('button', { type: 'button', class: 'btn rate-again', onclick: () => pick('bad') }, 'Были ошибки'), h('button', { type: 'button', class: 'btn rate-good', onclick: () => pick('ok') }, 'Похоже на образец')));
+    const showBtn = h('button', { type: 'button', class: 'btn', onclick: () => { sample.hidden = false; showBtn.hidden = true; inp.disabled = true; } }, 'Показать образец');
+    const el = h('div', { class: 'ex' }, h('div', { class: 'ex-label' }, 'Мини-письмо · по желанию'), h('div', { class: 'ex-q' }, ex.q), ex.hint ? h('div', { class: 'ex-hint' }, ex.hint) : null, inp, accentBar([inp]), h('div', { class: 'dict-controls' }, showBtn), sample);
+    function pick(r) { rating = r; el.querySelectorAll('.anki-rate .btn').forEach((b) => (b.disabled = true)); el.dispatchEvent(new CustomEvent('ready', { bubbles: true, detail: { auto: true } })); }
+    return { el, focus() { inp.focus(); }, autoCheck: true, isReady() { return rating !== null; }, check() { return { correct: rating === 'ok', skipFeedback: true }; } };
+  };
+
+  // Произношение: слушаем, повторяем вслух; при наличии распознавания — сверяем
+  types.shadow = function (ex, ctx) {
+    let rating = null; let attempts = 0;
+    const result = h('div', { class: 'shadow-result' });
+    const micBtn = canListen() ? h('button', { type: 'button', class: 'btn primary', onclick: () => {
+      micBtn.disabled = true; micBtn.textContent = '🎤 Слушаю…';
+      listen((err, alts) => {
+        micBtn.disabled = false; micBtn.textContent = '🎤 Сказать';
+        if (err) { result.replaceChildren(h('span', { class: 'muted' }, err === 'not-allowed' ? 'Нет доступа к микрофону. Оцени себя сам.' : 'Не расслышал. Попробуй ещё раз или оцени себя сам.')); return; }
+        attempts++;
+        const best = alts.map((a) => ({ a, s: similarity(a, ex.s) })).sort((x, y) => y.s - x.s)[0];
+        const pct = Math.round(best.s * 100);
+        result.replaceChildren(h('div', null, 'Распознано: ', h('b', null, best.a)), h('div', { class: pct >= 70 ? 'ok-text' : 'bad-text' }, 'Совпадение: ' + pct + '%'));
+        if (pct >= 70) pick('ok');
+      });
+    } }, '🎤 Сказать') : null;
+    const el = h('div', { class: 'ex' },
+      h('div', { class: 'ex-label' }, 'Произношение · по желанию'),
+      h('div', { class: 'ex-q' }, ex.s, speakBtn(ex.s)),
+      ex.ru ? h('div', { class: 'ex-hint' }, ex.ru) : null,
+      h('p', { class: 'muted small' }, 'Прослушай, повтори вслух в том же темпе два-три раза.' + (canListen() ? ' Можно проверить себя микрофоном.' : '')),
+      h('div', { class: 'dict-controls' }, h('button', { type: 'button', class: 'btn', onclick: () => speak(ex.s, 0.85) }, '🔊 Ещё раз'), h('button', { type: 'button', class: 'btn ghost', onclick: () => speak(ex.s, 0.6) }, '🐢 Медленно'), micBtn),
+      result,
+      h('div', { class: 'anki-rate' }, h('button', { type: 'button', class: 'btn rate-again', onclick: () => pick('bad') }, 'Сложно'), h('button', { type: 'button', class: 'btn rate-good', onclick: () => pick('ok') }, 'Получилось')));
+    if (ctx.tts) setTimeout(() => speak(ex.s, 0.85), 300);
+    function pick(r) { if (rating) return; rating = r; el.querySelectorAll('.anki-rate .btn').forEach((b) => (b.disabled = true)); el.dispatchEvent(new CustomEvent('ready', { bubbles: true, detail: { auto: true } })); }
+    return { el, autoCheck: true, isReady() { return rating !== null; }, check() { return { correct: rating === 'ok', skipFeedback: true }; } };
+  };
+
+  // «Найди пары»: перемешанная сетка из слов и переводов
+  types.pairs = function (ex) {
+    const tiles = shuffle(ex.pairs.flatMap((p, i) => [{ t: p[0], i, side: 'es' }, { t: p[1], i, side: 'ru' }]));
+    let first = null; let errors = 0; let done = 0; const start = Date.now();
+    const timer = h('span', { class: 'pairs-timer' }, '0 с');
+    const iv = setInterval(() => { timer.textContent = Math.round((Date.now() - start) / 1000) + ' с'; }, 500);
+    const grid = h('div', { class: 'pairs-grid' }, tiles.map((x) => h('button', { type: 'button', class: 'ptile ' + x.side, 'data-i': x.i, 'data-side': x.side, onclick: (e) => tap(e.currentTarget) }, x.t)));
+    const el = h('div', { class: 'ex' }, h('div', { class: 'ex-label' }, 'Найди пары', h('span', { class: 'pairs-meta' }, timer, ' · ошибок: ', h('span', { class: 'pairs-err' }, '0'))), grid);
+    function tap(btn) {
+      if (btn.classList.contains('done')) return;
+      if (!first) { first = btn; btn.classList.add('sel'); return; }
+      if (first === btn) { btn.classList.remove('sel'); first = null; return; }
+      const ok = first.dataset.i === btn.dataset.i && first.dataset.side !== btn.dataset.side;
+      const a = first; first = null; a.classList.remove('sel');
+      if (ok) { [a, btn].forEach((x) => { x.classList.add('done'); x.disabled = true; }); done++; if (done === ex.pairs.length) { clearInterval(iv); el.dispatchEvent(new CustomEvent('ready', { bubbles: true, detail: { auto: true } })); } }
+      else { errors++; el.querySelector('.pairs-err').textContent = errors; [a, btn].forEach((x) => { x.classList.add('shake'); setTimeout(() => x.classList.remove('shake'), 400); }); }
+    }
+    return { el, autoCheck: true, isReady() { return done === ex.pairs.length; }, check() { const sec = Math.round((Date.now() - start) / 1000); return { correct: errors <= Math.ceil(ex.pairs.length / 3), answerText: 'Время: ' + sec + ' с · ошибок: ' + errors, skipFeedback: false, pairsStats: { sec, errors } }; } };
+  };
+
   // Раскрыть сгенерированные упражнения (conj) в конкретные fill-задания
   function expand(ex, rng) {
     if (ex.t !== 'conj') return [ex];
@@ -275,5 +358,5 @@
     return out;
   }
 
-  window.Engine = { h, $, shuffle, pick, norm, compare, speak, canSpeak, speakBtn, types, expand };
+  window.Engine = { h, $, shuffle, pick, norm, compare, speak, canSpeak, speakBtn, canListen, listen, similarity, types, expand };
 })();

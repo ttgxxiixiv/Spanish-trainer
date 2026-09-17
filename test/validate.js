@@ -2,7 +2,7 @@
 const fs = require('fs'); const vm = require('vm'); const path = require('path');
 const ctx = { window: {} }; vm.createContext(ctx);
 const load = (f) => vm.runInContext(fs.readFileSync(path.join(__dirname, '..', f), 'utf8'), ctx, { filename: f });
-load('js/conjugation.js'); load('js/data/curriculum.js');
+load('js/conjugation.js'); load('js/data/curriculum.js'); load('js/data/extras.js');
 for (let i = 1; i <= 10; i++) load('js/data/m' + String(i).padStart(2, '0') + '.js');
 const D = ctx.window.ST_DATA.days, M = ctx.window.ST_DATA.modules, Conj = ctx.window.Conj;
 const errors = [], warnings = [];
@@ -62,6 +62,7 @@ for (let day = 1; day <= 60; day++) {
     }
   });
 }
+for (let d = 1; d <= 60; d++) { const e = ctx.window.ST_DATA.extras[d]; if (!e || !e.q || !e.sample) errors.push('extras: missing writing prompt for day ' + d); else if (/[\u0400-\u04FF]/.test(e.sample)) errors.push('extras day ' + d + ': Cyrillic in sample'); }
 const regs = [...new Set(warnings.map((w) => w.replace('regular verb assumed: ', '')))];
 console.log(`days: ${Object.keys(D).length}, words: ${wordCount}, exercise entries: ${exCount}, generated conj items: ~${conjCount}`);
 console.log('verbs conjugated by regular rules:', regs.join(', '));

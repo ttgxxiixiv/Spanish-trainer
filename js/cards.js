@@ -107,7 +107,7 @@
   function modeFor(c, w) {
     const pref = st().settings.cardMode || 'mix';
     if (pref !== 'mix') return pref;
-    return ((c.s + w.rank) % 2 === 0) ? 'self' : 'mc';
+    return ['self', 'mc', 'type'][(c.s + w.rank) % 3];
   }
   function dirFor(c, w) {
     const pref = st().settings.cardDir || 'both';
@@ -121,8 +121,9 @@
       if (isNew) return { type: 'ex', card: id, ex: { t: 'ankiNew', w } };
       const c = cardState(id) || { s: 0, intro: today() };
       const dir = dirFor(c, w); const mode = modeFor(c, w);
-      const ex = { t: mode === 'mc' ? 'ankiMc' : 'anki', w, dir, stage: c.s, day: Store.daysBetween(c.intro, today()) };
-      if (mode === 'mc') { ex.options = distractors(w, dir); ex.answer = dir === 'es' ? w.ru : w.es; ex.e = w.ex + (w.exRu ? ' — ' + w.exRu : ''); }
+      const ex = { t: mode === 'mc' ? 'ankiMc' : mode === 'type' ? 'ankiType' : 'anki', w, dir, stage: c.s, day: Store.daysBetween(c.intro, today()) };
+      if (mode === 'mc') { ex.options = distractors(w, dir); ex.answer = dir === 'es' ? w.ru : w.es; }
+      if (mode !== 'self') ex.e = w.ex + (w.exRu ? ' — ' + w.exRu : '');
       return { type: 'ex', card: id, ex };
     }).filter(Boolean);
   }
@@ -194,6 +195,60 @@
     };
   };
 
+  // Режим с набором слова: активное воспроизведение
+  types.ankiType = function (ex, ctx) {
+    const w = ex.w;
+    const inp = h('input', { class: 'inp wide', type: 'text', autocapitalize: 'off', autocomplete: 'off', spellcheck: 'false', placeholder: 'по-испански…' });
+    inp.addEventListener('input', () => el.dispatchEvent(new CustomEvent('ready', { bubbles: true })));
+    const blanked = w.ex ? w.ex.replace(new RegExp('\\S*' + w.es.replace(/^(el|la|los|las|un|una)\s+/, '').replace(/se$/, '').slice(0, 4).replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\S*', 'i'), '___') : '';
+    const el = h('div', { class: 'ex anki' },
+      h('div', { class: 'ex-label' }, 'Напиши по-испански · ' + STAGE_LABEL[ex.stage] + (ex.requeue ? ' · повтор' : '')),
+      h('div', { class: 'ex-q big' }, w.ru),
+      blanked && blanked !== w.ex ? h('div', { class: 'ex-hint' }, blanked + (w.exRu ? ' — ' + w.exRu : '')) : null,
+      inp);
+    el.append(accentRow(inp));
+    const accepted = [w.es, w.es.replace(/^(el|la|los|las)\s+/, '')];
+    return {
+      el, focus() { inp.focus(); },
+      check() {
+        const r = Engine.compare(inp.value, accepted, ctx.strict);
+        inp.disabled = true; inp.classList.add(r === 'no' ? 'wrong' : 'right');
+        return { correct: r !== 'no', accent: r === 'accent', rating: r !== 'no' ? 'good' : 'again', answerText: w.es + ' — ' + w.ru };
+      }
+    };
+  };
+  function accentRow(input) {
+    const chars = ['á', 'é', 'í', 'ó', 'ú', 'ñ', 'ü'];
+    return h('div', { class: 'accents' }, chars.map((c) => h('button', { type: 'button', class: 'acc', tabindex: '-1', onmousedown: (e) => e.preventDefault(), onclick: () => {
+      if (input.disabled) return; const s = input.selectionStart, e2 = input.selectionEnd;
+      input.value = input.value.slice(0, s) + c + input.value.slice(e2); input.selectionStart = input.selectionEnd = s + 1; input.focus();
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    } }, c)));
+  }
+
+  // ---- «Найди пары» на словах словаря ----
+  function pairsPool(source) {
+    const s = st(); const list = all();
+    if (source === 'learning') { const ids = Object.keys(s.cards).filter((id) => !s.cards[id].k && s.cards[id].s < 4); if (ids.length >= 6) return ids.map((id) => word(id)).filter(Boolean); }
+    if (source === 'known') { const ids = Object.keys(s.cards).filter((id) => !s.cards[id].k && s.cards[id].s >= 4); if (ids.length >= 6) return ids.map((id) => word(id)).filter(Boolean); }
+    const m = /^range:(\d+)-(\d+)$/.exec(source || '');
+    if (m) return list.filter((w) => w.rank >= Number(m[1]) && w.rank <= Number(m[2]));
+    return list;
+  }
+  function pairsSteps(words, rounds, per) {
+    const pool = Engine.shuffle(words); const out = [];
+    for (let r = 0; r < rounds && pool.length >= per; r++) {
+      const chunk = pool.splice(0, per);
+      out.push({ type: 'ex', ex: { t: 'pairs', pairs: chunk.map((w) => [w.es, w.ru]) } });
+    }
+    return out;
+  }
+  function pairsSession(ctx, source, rounds) {
+    const steps = pairsSteps(pairsPool(source), rounds, 6);
+    if (!steps.length) { ctx.toast('Слишком мало слов для игры'); return; }
+    ctx.startCustomLesson('Найди пары', [{ type: 'section', title: 'Найди пары', text: steps.length + ' раундов по 6 пар. Нажимай на слово и его перевод.' }].concat(steps));
+  }
+
   // ---- экран ----
   function screen(app, ctx) {
     const s = st(); const S = stats();
@@ -224,10 +279,17 @@
     const set = (k, v) => { s.settings[k] = v; Store.save(); };
     frag.append(h('section', { class: 'card' }, h('h3', null, 'Настройки карточек'),
       h('label', { class: 'switch' }, h('span', null, 'Новых слов в день', h('small', null, '20 в день = 3000 слов за 5 месяцев; 50 в день = за 2 месяца')), h('input', { class: 'inp short', type: 'number', min: '0', max: '200', value: s.settings.newPerDay, onchange: (e) => { set('newPerDay', Math.max(0, Math.min(200, Number(e.target.value) || 0))); ctx.rerender(); } })),
-      h('label', { class: 'switch' }, h('span', null, 'Режим карточек', h('small', null, 'Самооценка: вспомнил и сам оцениваешь. Выбор: четыре варианта ответа.')), h('select', { class: 'inp', onchange: (e) => set('cardMode', e.target.value) },
-        [['mix', 'чередовать'], ['self', 'самооценка (Anki)'], ['mc', 'выбор из 4 вариантов']].map(([v, l]) => h('option', { value: v, selected: (s.settings.cardMode || 'mix') === v ? '' : null }, l)))),
+      h('label', { class: 'switch' }, h('span', null, 'Режим карточек', h('small', null, 'Самооценка: вспомнил и сам оцениваешь. Выбор: четыре варианта. Написать: набираешь слово по переводу, самый сильный способ запомнить.')), h('select', { class: 'inp', onchange: (e) => set('cardMode', e.target.value) },
+        [['mix', 'чередовать'], ['self', 'самооценка (Anki)'], ['mc', 'выбор из 4 вариантов'], ['type', 'написать слово']].map(([v, l]) => h('option', { value: v, selected: (s.settings.cardMode || 'mix') === v ? '' : null }, l)))),
       h('label', { class: 'switch' }, h('span', null, 'Направление карточек'), h('select', { class: 'inp', onchange: (e) => set('cardDir', e.target.value) },
         [['both', 'чередовать'], ['es', 'испанский → перевод'], ['ru', 'перевод → испанский']].map(([v, l]) => h('option', { value: v, selected: (s.settings.cardDir || 'both') === v ? '' : null }, l))))));
+
+    // тренажёр «Найди пары»
+    const src = h('select', { class: 'inp' }, [['learning', 'слова в изучении'], ['known', 'выученные слова'], ['all', 'любые из 3000'], ['range:1-500', 'слова 1–500'], ['range:501-1500', 'слова 501–1500'], ['range:1501-3000', 'слова 1501–3000']].map(([v, l]) => h('option', { value: v }, l)));
+    const rounds = h('select', { class: 'inp' }, [[3, '3 раунда'], [5, '5 раундов'], [10, '10 раундов']].map(([v, l]) => h('option', { value: v, selected: v === 5 ? '' : null }, l)));
+    frag.append(h('section', { class: 'card' }, h('h3', null, 'Найди пары'),
+      h('p', { class: 'muted small' }, 'Быстрая игра на узнавание: 12 плиток, соедини слово с переводом. Не меняет график повторений, но добавляет лишний контакт со словами.'),
+      h('div', { class: 'row-links' }, src, rounds, h('button', { class: 'btn primary', type: 'button', onclick: () => pairsSession(ctx, src.value, Number(rounds.value)) }, 'Играть'))));
 
     // поиск и список
     const search = h('input', { class: 'inp wide', type: 'search', placeholder: 'Найти слово по-испански или по-русски…' });
@@ -259,5 +321,5 @@
     ctx.startCustomLesson('Карточки', stp);
   }
 
-  window.Cards = { all, word, cardState, due, newLeft, nextNew, rate, reset, markKnownUpTo, stats, steps, screen, session, DUE_AFTER, STAGE_LABEL };
+  window.Cards = { all, word, cardState, due, newLeft, nextNew, rate, reset, markKnownUpTo, stats, steps, screen, session, pairsPool, pairsSteps, pairsSession, DUE_AFTER, STAGE_LABEL };
 })();

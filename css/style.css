@@ -180,3 +180,25 @@ p { margin: 0 0 10px; }
 .anki-rate .rate-again { border-color: var(--bad); color: var(--bad); }
 .anki-rate .rate-good { border-color: var(--green); color: var(--green); font-weight: 600; }
 .anki .anki-exru { color: var(--muted); font-size: .9rem; margin-top: 2px; }
+
+/* дополнительные блоки, письмо, произношение, пары, слабые темы */
+.extras { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; }
+.extra { text-align: left; border: 1px solid var(--line); background: var(--bg); color: var(--text); border-radius: 10px; padding: 10px 14px; cursor: pointer; }
+.extra b { display: block; }
+.extra span { font-size: .85rem; color: var(--muted); }
+.extra.done { opacity: .55; }
+.sample { margin-top: 10px; border-top: 1px dashed var(--line); padding-top: 10px; }
+.sample-text { padding: 8px 12px; border-left: 3px solid var(--green); background: var(--bg); border-radius: 0 8px 8px 0; margin-bottom: 8px; }
+.shadow-result { margin: 8px 0; font-size: .95rem; }
+.ok-text { color: var(--green); font-weight: 600; }
+.bad-text { color: var(--bad); font-weight: 600; }
+.pairs-meta { float: right; text-transform: none; letter-spacing: 0; }
+.pairs-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 8px; }
+.ptile { border: 1px solid var(--line); background: var(--bg); color: var(--text); border-radius: 10px; padding: 12px 6px; min-height: 60px; font-size: .92rem; cursor: pointer; line-height: 1.25; }
+.ptile.es { font-weight: 600; }
+.ptile.sel { border-color: var(--red); background: var(--sel); }
+.ptile.done { opacity: .25; border-color: var(--green); }
+.ptile.shake { animation: shake .35s; border-color: var(--bad); }
+.weak { list-style: none; padding: 0; margin: 0; }
+.weak li { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--line); font-size: .95rem; }
+.weak li:last-child { border-bottom: 0; }
