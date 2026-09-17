@@ -116,6 +116,12 @@
       )
     );
     frag.append(todayRow);
+    const cs = Cards.stats();
+    frag.append(h('section', { class: 'card' + (cs.due ? ' warn' : '') },
+      h('h3', null, 'Карточки: 3000 слов'),
+      h('p', { class: 'muted' }, cs.due ? 'К повторению сегодня: ' + cs.due + '. ' : 'Просроченных нет. ', cs.newLeft && cs.fresh ? 'Новых на сегодня: ' + Math.min(cs.newLeft, cs.fresh) + '. ' : '', 'Выучено: ' + (cs.longterm + cs.known) + ' из ' + cs.total + '.'),
+      h('div', { class: 'row-links' }, h('a', { class: 'btn ' + (cs.due || (cs.newLeft && cs.fresh) ? 'primary' : 'ghost'), href: '#cards' }, cs.due ? 'Повторить карточки' : 'Открыть карточки'))
+    ));
 
     if (sched) {
       let txt, cls = '';
@@ -167,6 +173,8 @@
   function buildLesson(day) {
     const d = ST_DATA.days[day];
     const steps = [];
+    const cardsDue = Cards.due(50);
+    if (cardsDue.length) steps.push({ type: 'section', title: 'Карточки к повторению', text: cardsDue.length + ' слов по графику 1–3–7–21. Это обязательная часть: график не ждёт.' + (Cards.due().length > 50 ? ' Остальные ' + (Cards.due().length - 50) + ' ждут в разделе «Карточки».' : '') }, ...Cards.steps(cardsDue, false));
     const due = Store.srsDue(d.review ? 10 : 6);
     if (due.length) steps.push({ type: 'section', title: 'Повторение слов', text: 'Слова из прошлых уроков, которые пора вспомнить.' }, ...buildSrsSteps(due));
     if (d.grammar) steps.push({ type: 'grammar', g: d.grammar });
@@ -250,6 +258,7 @@
         L.total++;
         if (r.correct) L.correct++; else L.wrong.push(step);
         if (step.srs) Store.srsRate(step.srs, r.correct);
+        if (step.card) Cards.rate(step.card, r.rating);
         if (step.key) Store.recordAnswer(step.key, step.day || L.day, r.correct);
         if (L.custom && r.correct && step.key) Store.clearMistake(step.key);
         Store.save();
@@ -260,7 +269,7 @@
           step.ex.say || (step.ex.t === 'order' || step.ex.t === 'dict' || step.ex.t === 'tr') ? speakBtn(step.ex.say || step.ex.s || (step.ex.a && step.ex.a[0]), '🔊 Прослушать') : null
         );
         foot.replaceChildren();
-        if (r.skipFeedback && r.correct) { L.i++; setTimeout(renderLessonStep, 350); return; }
+        if (r.skipFeedback) { L.i++; setTimeout(renderLessonStep, r.correct ? 350 : 120); return; }
         foot.append(fb, nextBtn());
         setTimeout(() => foot.querySelector('.btn').focus(), 30);
       }
@@ -294,9 +303,16 @@
         h('div', { class: 'stat' }, h('b', null, st.xp), h('span', null, '⭐ очков'))),
       L.day && ST_DATA.days[L.day].review ? h('p', { class: 'muted' }, score >= 70 ? 'Модуль закрыт. Уровень растёт.' : 'Рекомендуется вернуться к урокам модуля, где были ошибки.') : null
     ));
+    const csum = Cards.stats();
+    if (L.day && csum.newLeft && csum.fresh) foot.append(h('button', { class: 'btn ghost big', type: 'button', onclick: () => Cards.session({ toast, startCustomLesson }, false, true) }, 'Выучить ' + Math.min(csum.newLeft, csum.fresh) + ' новых карточек'));
     if (L.wrong.length) foot.append(h('button', { class: 'btn ghost big', type: 'button', onclick: () => startCustomLesson('Работа над ошибками', L.wrong.map((s) => Object.assign({}, s, { srs: null }))) }, 'Прорешать ошибки (' + L.wrong.length + ')'));
     foot.append(h('a', { class: 'btn primary big', href: nd && !L.custom ? '#home' : '#home', onclick: () => { lesson = null; } }, 'На главную'));
   }
+
+  // ================= Карточки =================
+  routes.cards = function () {
+    Cards.screen(app, { toast, startCustomLesson, rerender: () => routes.cards() });
+  };
 
   // ================= Повторение слов =================
   routes.review = function () {

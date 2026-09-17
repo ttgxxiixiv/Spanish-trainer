@@ -1,8 +1,10 @@
 /* Service worker: кэшируем всё приложение при установке, отдаём из кэша, обновляем в фоне. */
-const VERSION = 'st-v1';
+const VERSION = 'st-v2';
 const ASSETS = [
   './', './index.html', './manifest.webmanifest', './css/style.css',
-  './js/conjugation.js', './js/store.js', './js/engine.js', './js/app.js',
+  './js/conjugation.js', './js/store.js', './js/engine.js', './js/cards.js', './js/app.js',
+  './js/data/words/w01.js', './js/data/words/w02.js', './js/data/words/w03.js', './js/data/words/w04.js', './js/data/words/w05.js',
+  './js/data/words/w06.js', './js/data/words/w07.js', './js/data/words/w08.js', './js/data/words/w09.js', './js/data/words/w10.js',
   './js/data/curriculum.js',
   './js/data/m01.js', './js/data/m02.js', './js/data/m03.js', './js/data/m04.js', './js/data/m05.js',
   './js/data/m06.js', './js/data/m07.js', './js/data/m08.js', './js/data/m09.js', './js/data/m10.js',

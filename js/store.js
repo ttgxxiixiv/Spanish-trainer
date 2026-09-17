@@ -29,8 +29,10 @@
       lastActive: null,
       activity: {},      // { 'YYYY-MM-DD': секунды }
       mistakes: {},      // { key: { day, count, last } }
+      cards: {},         // карточки 3000 слов: { id: { s, intro, due, reps, lapses, k } }
+      cardLog: {},       // { 'YYYY-MM-DD': { n: новых, r: повторов } }
       stats: { answered: 0, correct: 0 },
-      settings: { tts: true, unlockAll: false, strictAccents: false, dailyGoalMin: 15 }
+      settings: { tts: true, unlockAll: false, strictAccents: false, dailyGoalMin: 15, newPerDay: 20, cardDir: 'both' }
     };
   }
 
@@ -68,7 +70,6 @@
       state.lastActive = t;
       state.bestStreak = Math.max(state.bestStreak, state.streak);
     }
-    if (!state.startDate) state.startDate = t;
     if (seconds) state.activity[t] = (state.activity[t] || 0) + seconds;
     save();
   }
@@ -90,6 +91,7 @@
     };
     const bonus = prev ? 10 : 30;
     state.xp += bonus;
+    if (!state.startDate) state.startDate = today();
     touch(seconds);
   }
   function recordAnswer(key, day, correct) {
@@ -173,6 +175,11 @@
       }
       for (const day in data.activity) state.activity[day] = Math.max(state.activity[day] || 0, data.activity[day]);
       for (const k in data.mistakes) if (!state.mistakes[k]) state.mistakes[k] = data.mistakes[k];
+      for (const id in data.cards || {}) {
+        const a = state.cards[id], b = data.cards[id];
+        state.cards[id] = !a ? b : (b.s > a.s || (b.s === a.s && (b.last || b.intro) > (a.last || a.intro)) ? b : a);
+      }
+      for (const d in data.cardLog || {}) { const a = state.cardLog[d] || { n: 0, r: 0 }, b = data.cardLog[d]; state.cardLog[d] = { n: Math.max(a.n || 0, b.n || 0), r: Math.max(a.r || 0, b.r || 0) }; }
       state.xp = Math.max(state.xp, data.xp);
       state.bestStreak = Math.max(state.bestStreak, data.bestStreak);
       if (!state.startDate || (data.startDate && data.startDate < state.startDate)) state.startDate = data.startDate;

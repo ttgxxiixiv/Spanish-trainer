@@ -30,7 +30,8 @@ p { margin: 0 0 10px; }
 .nav { display: flex; gap: 2px; }
 .nav a { text-decoration: none; color: var(--muted); padding: 6px 10px; border-radius: 8px; font-size: .9rem; }
 .nav a.active { background: var(--sel); color: var(--text); }
-@media (max-width: 420px) { .nav a { padding: 6px 7px; font-size: .82rem; } .brand-lvl { display: none; } }
+@media (max-width: 480px) { .nav a { padding: 6px 6px; font-size: .8rem; } .brand-lvl { display: none; } }
+@media (max-width: 400px) { .brand { font-size: 0; } .brand-flag { width: 22px; height: 15px; } .nav a { padding: 6px 5px; } }
 
 .app { max-width: 680px; margin: 0 auto; padding: 16px 16px 40px; }
 .screen { display: flex; flex-direction: column; gap: 14px; }
@@ -165,3 +166,16 @@ p { margin: 0 0 10px; }
 .toast { position: fixed; left: 50%; bottom: 24px; transform: translate(-50%, 20px); background: var(--text); color: var(--bg); padding: 10px 16px; border-radius: 10px; opacity: 0; transition: .25s; pointer-events: none; z-index: 20; font-size: .95rem; max-width: 90vw; }
 .toast.show { opacity: 1; transform: translate(-50%, 0); }
 .offline-badge { position: fixed; top: 8px; right: 8px; z-index: 30; font-size: .7rem; background: var(--yellow); color: #1f1a17; padding: 2px 8px; border-radius: 999px; pointer-events: none; }
+
+/* карточки */
+.anki .anki-es { font-weight: 700; font-size: 1.4rem; }
+.anki .anki-es.big { font-size: 1.7rem; text-align: center; padding: 10px 0 4px; }
+.anki .anki-ru { font-size: 1.1rem; margin: 4px 0 8px; }
+.anki .anki-ex { padding: 8px 12px; border-left: 3px solid var(--yellow); background: var(--bg); border-radius: 0 8px 8px 0; margin-bottom: 12px; }
+.anki .anki-ex em { color: var(--red); font-style: normal; font-weight: 600; }
+.anki .anki-back { border-top: 1px dashed var(--line); padding-top: 12px; margin-top: 8px; }
+.anki-rate { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.anki-rate .btn { padding: 12px 8px; }
+.anki-rate .btn small { display: block; font-weight: 400; font-size: .75rem; opacity: .75; }
+.anki-rate .rate-again { border-color: var(--bad); color: var(--bad); }
+.anki-rate .rate-good { border-color: var(--green); color: var(--green); font-weight: 600; }
