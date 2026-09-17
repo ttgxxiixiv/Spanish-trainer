@@ -255,10 +255,17 @@
       function doCheck() {
         if (checked) return; checked = true;
         const r = inst.check();
-        L.total++;
-        if (r.correct) L.correct++; else L.wrong.push(step);
-        if (step.srs) Store.srsRate(step.srs, r.correct);
-        if (step.card) Cards.rate(step.card, r.rating);
+        if (!step.requeue) { L.total++; if (r.correct) L.correct++; else L.wrong.push(step); }
+        if (step.srs && !step.requeue) Store.srsRate(step.srs, r.correct);
+        if (step.card && !step.requeue) Cards.rate(step.card, r.rating);
+        // слово с ошибкой возвращается в конец текущей сессии, пока не будет отвечено верно
+        if (!r.correct && (step.card || step.srs) && step.ex.t !== 'ankiNew') {
+          const again = Object.assign({}, step, { requeue: true, ex: Object.assign({}, step.ex, { requeue: true }) });
+          // вставляем через три карточки, но не дальше конца текущего блока карточек
+          let pos = L.i + 1, n = 0;
+          while (pos < L.steps.length && L.steps[pos].type === 'ex' && (L.steps[pos].card || L.steps[pos].srs) && n < 3) { pos++; n++; }
+          L.steps.splice(pos, 0, again);
+        }
         if (step.key) Store.recordAnswer(step.key, step.day || L.day, r.correct);
         if (L.custom && r.correct && step.key) Store.clearMistake(step.key);
         Store.save();

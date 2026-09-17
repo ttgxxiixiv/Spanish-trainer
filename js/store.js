@@ -32,7 +32,7 @@
       cards: {},         // карточки 3000 слов: { id: { s, intro, due, reps, lapses, k } }
       cardLog: {},       // { 'YYYY-MM-DD': { n: новых, r: повторов } }
       stats: { answered: 0, correct: 0 },
-      settings: { tts: true, unlockAll: false, strictAccents: false, dailyGoalMin: 15, newPerDay: 20, cardDir: 'both' }
+      settings: { tts: true, unlockAll: false, strictAccents: false, dailyGoalMin: 15, newPerDay: 20, cardDir: 'both', cardMode: 'mix' }
     };
   }
 

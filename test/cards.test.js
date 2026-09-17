@@ -2,7 +2,7 @@
 const fs = require('fs'); const vm = require('vm');
 const mem = {};
 const ctx = {
-  window: { ST_DATA: { freqRaw: ['uno|один|Uno.\ndos|два|Dos.\ntres|три|Tres.'] } },
+  window: { ST_DATA: { freqRaw: ['uno|один|Uno.|Один.\ndos|два|Dos.|Два.\ntres|три|Tres.|Три.'] } },
   localStorage: { getItem: (k) => (k in mem ? mem[k] : null), setItem: (k, v) => { mem[k] = String(v); } },
   TextEncoder, TextDecoder, btoa: (s) => Buffer.from(s, 'binary').toString('base64'), atob: (s) => Buffer.from(s, 'base64').toString('binary'),
   console

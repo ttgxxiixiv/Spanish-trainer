@@ -12,9 +12,10 @@ raw.forEach((chunk, fi) => {
     const t = line.trim(); if (!t) return;
     n++; cnt++;
     const parts = t.split('|');
-    if (parts.length !== 3) { errors.push(`${files[fi]}:${li + 1}: expected 3 fields, got ${parts.length}: ${t}`); return; }
-    const [es, ru, ex] = parts.map((s) => s.trim());
-    if (!es || !ru || !ex) errors.push(`${files[fi]}:${li + 1}: empty field: ${t}`);
+    if (parts.length !== 4) { errors.push(`${files[fi]}:${li + 1}: expected 4 fields, got ${parts.length}: ${t}`); return; }
+    const [es, ru, ex, exRu] = parts.map((s) => s.trim());
+    if (!es || !ru || !ex || !exRu) errors.push(`${files[fi]}:${li + 1}: empty field: ${t}`);
+    if (!/[\u0400-\u04FF]/.test(exRu)) errors.push(`${files[fi]}:${li + 1}: example translation without Cyrillic: ${t}`);
     const key = es.toLowerCase().replace(/\s*\(.*\)$/, '');
     if (seen.has(key)) errors.push(`${files[fi]}:${li + 1}: duplicate "${es}" (first in ${seen.get(key)})`); else seen.set(key, files[fi] + ':' + (li + 1));
     if (ex && !/[.!?]$/.test(ex)) errors.push(`${files[fi]}:${li + 1}: example without final punctuation: ${ex}`);

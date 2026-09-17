@@ -179,3 +179,4 @@ p { margin: 0 0 10px; }
 .anki-rate .btn small { display: block; font-weight: 400; font-size: .75rem; opacity: .75; }
 .anki-rate .rate-again { border-color: var(--bad); color: var(--bad); }
 .anki-rate .rate-good { border-color: var(--green); color: var(--green); font-weight: 600; }
+.anki .anki-exru { color: var(--muted); font-size: .9rem; margin-top: 2px; }

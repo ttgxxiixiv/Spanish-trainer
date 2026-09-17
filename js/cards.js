@@ -15,9 +15,9 @@
     for (const chunk of (ST_DATA.freqRaw || [])) {
       for (const line of chunk.split('\n')) {
         const t = line.trim(); if (!t) continue;
-        const [es, ru, ex] = t.split('|').map((s) => s.trim());
+        const [es, ru, ex, exRu] = t.split('|').map((s) => s.trim());
         rank++;
-        const w = { id: 'f' + rank, rank, es, ru, ex: ex || '' };
+        const w = { id: 'f' + rank, rank, es, ru, ex: ex || '', exRu: exRu || '' };
         ALL.push(w); BY_ID[w.id] = w;
       }
     }
@@ -83,6 +83,32 @@
     return { total, known, learning, longterm, due: dueN, dueTomorrow, dueWeek, fresh: total - known - learning - longterm, newLeft: newLeft(), newToday: newToday() };
   }
 
+  function kind(w) {
+    if (/^(el|la|los|las)\s/.test(w.es)) return 'n';
+    if (/^[a-záéíóúñ]+(ar|er|ir)(se)?$/.test(w.es)) return 'v';
+    if (/\s/.test(w.es)) return 'p';
+    return 'a';
+  }
+  // Три дистрактора того же типа и близкого ранга
+  function distractors(w, dir) {
+    const list = all(); const k = kind(w);
+    const val = (x) => (dir === 'es' ? x.ru : x.es);
+    const taken = new Set([val(w)]);
+    const pool = list.filter((x) => x.id !== w.id && kind(x) === k && Math.abs(x.rank - w.rank) <= 200);
+    const wide = list.filter((x) => x.id !== w.id && kind(x) === k);
+    const out = [];
+    for (const src of [pool, wide, list]) {
+      const arr = Engine.shuffle(src);
+      for (const x of arr) { if (out.length >= 3) break; const v = val(x); if (x.id === w.id || taken.has(v)) continue; taken.add(v); out.push(v); }
+      if (out.length >= 3) break;
+    }
+    return out;
+  }
+  function modeFor(c, w) {
+    const pref = st().settings.cardMode || 'mix';
+    if (pref !== 'mix') return pref;
+    return ((c.s + w.rank) % 2 === 0) ? 'self' : 'mc';
+  }
   function dirFor(c, w) {
     const pref = st().settings.cardDir || 'both';
     if (pref !== 'both') return pref;
@@ -94,7 +120,10 @@
       const w = word(id); if (!w) return null;
       if (isNew) return { type: 'ex', card: id, ex: { t: 'ankiNew', w } };
       const c = cardState(id) || { s: 0, intro: today() };
-      return { type: 'ex', card: id, ex: { t: 'anki', w, dir: dirFor(c, w), stage: c.s, day: Store.daysBetween(c.intro, today()) } };
+      const dir = dirFor(c, w); const mode = modeFor(c, w);
+      const ex = { t: mode === 'mc' ? 'ankiMc' : 'anki', w, dir, stage: c.s, day: Store.daysBetween(c.intro, today()) };
+      if (mode === 'mc') { ex.options = distractors(w, dir); ex.answer = dir === 'es' ? w.ru : w.es; ex.e = w.ex + (w.exRu ? ' — ' + w.exRu : ''); }
+      return { type: 'ex', card: id, ex };
     }).filter(Boolean);
   }
 
@@ -115,7 +144,7 @@
     const back = h('div', { class: 'anki-back', hidden: '' },
       h('div', { class: 'anki-es' }, w.es, speakBtn(w.es)),
       h('div', { class: 'anki-ru' }, w.ru),
-      w.ex ? h('div', { class: 'anki-ex' }, highlight(w.ex, w.es), speakBtn(w.ex)) : null,
+      w.ex ? h('div', { class: 'anki-ex' }, h('div', null, highlight(w.ex, w.es), speakBtn(w.ex)), w.exRu ? h('div', { class: 'anki-exru' }, w.exRu) : null) : null,
       h('div', { class: 'anki-rate' },
         h('button', { type: 'button', class: 'btn rate-again', onclick: () => pick('again') }, 'Не помню', h('small', null, 'снова с 1-го дня')),
         h('button', { type: 'button', class: 'btn rate-good', onclick: () => pick('good') }, 'Помню', h('small', null, nextLabel(ex.stage)))));
@@ -135,12 +164,34 @@
       h('div', { class: 'ex-label' }, 'Новое слово · №' + w.rank + ' по частоте'),
       h('div', { class: 'anki-es big' }, w.es, speakBtn(w.es)),
       h('div', { class: 'anki-ru' }, w.ru),
-      w.ex ? h('div', { class: 'anki-ex' }, highlight(w.ex, w.es), speakBtn(w.ex)) : null,
+      w.ex ? h('div', { class: 'anki-ex' }, h('div', null, highlight(w.ex, w.es), speakBtn(w.ex)), w.exRu ? h('div', { class: 'anki-exru' }, w.exRu) : null) : null,
       h('div', { class: 'anki-rate' },
         h('button', { type: 'button', class: 'btn', onclick: () => pick('known') }, 'Уже знаю', h('small', null, 'не показывать')),
         h('button', { type: 'button', class: 'btn primary', onclick: () => pick('learn') }, 'Учить', h('small', null, 'повторы: 1, 3, 7, 21 день'))));
     function pick(r) { rating = r; el.querySelectorAll('.anki-rate .btn').forEach((b) => (b.disabled = true)); el.dispatchEvent(new CustomEvent('ready', { bubbles: true, detail: { auto: true } })); }
     return { el, autoCheck: true, isReady() { return rating !== null; }, check() { return { correct: true, rating, skipFeedback: true }; } };
+  };
+
+  // Режим с выбором из четырёх вариантов
+  types.ankiMc = function (ex) {
+    const w = ex.w; let chosen = null;
+    const opts = Engine.shuffle([ex.answer].concat(ex.options));
+    const el = h('div', { class: 'ex anki' },
+      h('div', { class: 'ex-label' }, (ex.dir === 'es' ? 'Выбери перевод' : 'Выбери испанское слово') + ' · ' + STAGE_LABEL[ex.stage] + (ex.requeue ? ' · повтор' : '')),
+      h('div', { class: 'ex-q big' }, ex.dir === 'es' ? w.es : w.ru, ex.dir === 'es' ? speakBtn(w.es) : null),
+      h('div', { class: 'options' }, opts.map((o) => h('button', { type: 'button', class: 'opt', onclick: (e) => {
+        if (chosen !== null) return;
+        chosen = o; e.currentTarget.classList.add('sel');
+        el.dispatchEvent(new CustomEvent('ready', { bubbles: true, detail: { auto: true } }));
+      } }, o))));
+    return {
+      el, autoCheck: true, isReady() { return chosen !== null; },
+      check() {
+        const correct = chosen === ex.answer;
+        el.querySelectorAll('.opt').forEach((b) => { if (b.textContent === ex.answer) b.classList.add('right'); else if (b.textContent === chosen) b.classList.add('wrong'); b.disabled = true; });
+        return { correct, rating: correct ? 'good' : 'again', answerText: w.es + ' — ' + w.ru };
+      }
+    };
   };
 
   // ---- экран ----
@@ -155,7 +206,7 @@
         h('div', { class: 'stat' }, h('b', null, S.learning), h('span', null, 'в графике')),
         h('div', { class: 'stat' }, h('b', null, S.longterm + S.known), h('span', null, 'выучено'))),
       h('div', { class: 'bar' }, h('div', { class: 'bar-fill ok', style: 'width:' + Math.round(((S.longterm + S.known) / S.total) * 100) + '%' })),
-      h('p', { class: 'muted small' }, 'Каждое слово возвращается на 1-й, 3-й, 7-й и 21-й день после изучения, потом закрепляется через 2 и 6 месяцев. Просроченные карточки обязательно появляются в начале следующего урока.'),
+      h('p', { class: 'muted small' }, 'Каждое слово возвращается на 1-й, 3-й, 7-й и 21-й день после изучения, потом закрепляется через 2 и 6 месяцев. Просроченные карточки обязательно появляются в начале следующего урока. Слово с ошибкой показывается снова в той же сессии, пока не ответишь верно.'),
       h('div', { class: 'row-links' },
         (S.due || S.newLeft) ? h('button', { class: 'btn primary big', type: 'button', onclick: () => session(ctx, true, true) }, 'Заниматься' + (S.due ? ': повторить ' + S.due : '') + (S.newLeft && S.fresh ? (S.due ? ' + ' : ': ') + Math.min(S.newLeft, S.fresh) + ' новых' : '')) : h('p', { class: 'muted' }, 'На сегодня всё сделано. Завтра к повторению: ' + S.dueTomorrow + '.'),
         S.due ? h('button', { class: 'btn', type: 'button', onclick: () => session(ctx, true, false) }, 'Только повторение') : null,
@@ -173,6 +224,8 @@
     const set = (k, v) => { s.settings[k] = v; Store.save(); };
     frag.append(h('section', { class: 'card' }, h('h3', null, 'Настройки карточек'),
       h('label', { class: 'switch' }, h('span', null, 'Новых слов в день', h('small', null, '20 в день = 3000 слов за 5 месяцев; 50 в день = за 2 месяца')), h('input', { class: 'inp short', type: 'number', min: '0', max: '200', value: s.settings.newPerDay, onchange: (e) => { set('newPerDay', Math.max(0, Math.min(200, Number(e.target.value) || 0))); ctx.rerender(); } })),
+      h('label', { class: 'switch' }, h('span', null, 'Режим карточек', h('small', null, 'Самооценка: вспомнил и сам оцениваешь. Выбор: четыре варианта ответа.')), h('select', { class: 'inp', onchange: (e) => set('cardMode', e.target.value) },
+        [['mix', 'чередовать'], ['self', 'самооценка (Anki)'], ['mc', 'выбор из 4 вариантов']].map(([v, l]) => h('option', { value: v, selected: (s.settings.cardMode || 'mix') === v ? '' : null }, l)))),
       h('label', { class: 'switch' }, h('span', null, 'Направление карточек'), h('select', { class: 'inp', onchange: (e) => set('cardDir', e.target.value) },
         [['both', 'чередовать'], ['es', 'испанский → перевод'], ['ru', 'перевод → испанский']].map(([v, l]) => h('option', { value: v, selected: (s.settings.cardDir || 'both') === v ? '' : null }, l))))));
 
@@ -189,7 +242,7 @@
         const status = !c ? 'ещё не учится' : c.k ? 'известно' : c.s >= KNOWN ? 'выучено' : c.s >= 4 ? 'долгосрочная память · след. ' + c.due : 'в графике · ' + STAGE_LABEL[c.s] + ' · след. ' + c.due;
         return h('div', { class: 'dict-item' + (c ? (c.k || c.s >= 4 ? ' known' : '') : ' new') },
           h('div', null, h('span', { class: 'muted small' }, w.rank + '. '), h('b', null, w.es), speakBtn(w.es), h('span', { class: 'muted' }, ' — ' + w.ru)),
-          w.ex ? h('div', { class: 'small' }, w.ex) : null,
+          w.ex ? h('div', { class: 'small' }, w.ex, w.exRu ? h('span', { class: 'muted' }, ' — ' + w.exRu) : null) : null,
           h('div', { class: 'dict-meta' }, status, ' · ', c ? h('a', { href: '#', onclick: (e) => { e.preventDefault(); reset(w.id); renderList(); } }, 'сбросить') : h('a', { href: '#', onclick: (e) => { e.preventDefault(); rate(w.id, 'known'); renderList(); } }, 'уже знаю')));
       }));
     }
