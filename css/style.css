@@ -202,21 +202,3 @@ p { margin: 0 0 10px; }
 .weak { list-style: none; padding: 0; margin: 0; }
 .weak li { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--line); font-size: .95rem; }
 .weak li:last-child { border-bottom: 0; }
-
-/* план недели */
-.week { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; margin: 8px 0; }
-.wday { display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 6px 2px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); color: var(--text); cursor: pointer; font-size: .7rem; position: relative; }
-.wday .wd { color: var(--muted); font-size: .65rem; white-space: nowrap; }
-.wday .wi { font-size: 1.1rem; line-height: 1.2; }
-.wday .wl { font-size: .68rem; }
-.wday.today { border-color: var(--red); border-width: 2px; }
-.wday.rest { background: var(--green-bg); }
-.wday.past { opacity: .6; }
-.wday.active { opacity: 1; }
-.wday.sel { background: var(--sel); border-color: var(--yellow); }
-.wday .wdone { position: absolute; top: 2px; right: 4px; color: var(--green); font-weight: 700; font-size: .7rem; }
-.week-nav { display: flex; align-items: center; justify-content: space-between; gap: 6px; margin-bottom: 6px; }
-.week-nav b { font-size: .9rem; text-align: center; }
-.week-nav .btn { padding: 6px 10px; font-size: .85rem; }
-.extra.chosen { border-color: var(--red); background: var(--sel); }
-.rest-card { border-color: var(--green); }

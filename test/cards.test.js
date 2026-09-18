@@ -15,7 +15,7 @@ load('js/store.js'); ctx.Store = ctx.window.Store; load('js/cards.js');
 const { Store, Cards } = ctx.window;
 // подменяем «сегодня»
 let day = 0; const base = '2026-01-01';
-Store.setClock(() => Store.addDays(base, day));
+Store.today = () => Store.addDays(base, day);
 let fail = 0;
 const eq = (a, b, msg) => { if (a !== b) { fail++; console.error('FAIL', msg, '\n  got', a, '\n  exp', b); } };
 

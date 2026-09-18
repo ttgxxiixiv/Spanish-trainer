@@ -4,7 +4,7 @@
   "description": "Тренажёр испанского A2→B2: 60 уроков по 10–20 минут, оффлайн, с переносом прогресса",
   "private": true,
   "scripts": {
-    "test": "node test/conjugation.test.js && node test/validate.js && node test/words.check.js strict && node test/cards.test.js && node test/plan.test.js",
+    "test": "node test/conjugation.test.js && node test/validate.js && node test/words.check.js strict && node test/cards.test.js",
     "start": "python3 -m http.server 8080"
   },
   "license": "MIT"
