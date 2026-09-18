@@ -3,7 +3,9 @@
   const KEY = 'spanish_trainer_v1';
   const VERSION = 1;
 
+  let clock = null; // подмена даты в тестах
   function today() {
+    if (clock) return clock();
     const d = new Date();
     return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
   }
@@ -31,6 +33,7 @@
       mistakes: {},      // { key: { day, count, last } }
       cards: {},         // карточки 3000 слов: { id: { s, intro, due, reps, lapses, k } }
       cardLog: {},       // { 'YYYY-MM-DD': { n: новых, r: повторов } }
+      plan: {},          // план недели: { 'YYYY-MM-DD': 'lesson' | 'cards' | ... | 'rest' }
       stats: { answered: 0, correct: 0 },
       settings: { tts: true, unlockAll: false, strictAccents: false, dailyGoalMin: 15, newPerDay: 20, cardDir: 'both', cardMode: 'mix' }
     };
@@ -62,11 +65,18 @@
   function reset() { state = blank(); save(); }
 
   // ---- активность и серия дней ----
+  function isRest(date) { return !!(state.plan && state.plan[date] === 'rest'); }
+  // все дни строго между a и b — дни отдыха (тогда серия не прерывается)
+  function onlyRestBetween(a, b) {
+    if (daysBetween(a, b) <= 1) return true;
+    for (let d = addDays(a, 1); d < b; d = addDays(d, 1)) if (!isRest(d)) return false;
+    return true;
+  }
   function touch(seconds) {
     const t = today();
     if (state.lastActive !== t) {
-      if (state.lastActive && daysBetween(state.lastActive, t) === 1) state.streak += 1;
-      else if (state.lastActive !== t) state.streak = 1;
+      if (state.lastActive && onlyRestBetween(state.lastActive, t)) state.streak += 1;
+      else state.streak = 1;
       state.lastActive = t;
       state.bestStreak = Math.max(state.bestStreak, state.streak);
     }
@@ -75,9 +85,10 @@
   }
   function currentStreak() {
     if (!state.lastActive) return 0;
-    const gap = daysBetween(state.lastActive, today());
-    return gap <= 1 ? state.streak : 0;
+    return onlyRestBetween(state.lastActive, today()) ? state.streak : 0;
   }
+  function setPlan(date, type) { if (!state.plan) state.plan = {}; if (type) state.plan[date] = type; else delete state.plan[date]; save(); }
+  function getPlan(date) { return (state.plan && state.plan[date]) || null; }
 
   // ---- уроки ----
   function completeDay(day, score, seconds) {
@@ -175,6 +186,7 @@
       }
       for (const day in data.activity) state.activity[day] = Math.max(state.activity[day] || 0, data.activity[day]);
       for (const k in data.mistakes) if (!state.mistakes[k]) state.mistakes[k] = data.mistakes[k];
+      for (const d in data.plan || {}) if (!state.plan[d]) state.plan[d] = data.plan[d];
       for (const id in data.cards || {}) {
         const a = state.cards[id], b = data.cards[id];
         state.cards[id] = !a ? b : (b.s > a.s || (b.s === a.s && (b.last || b.intro) > (a.last || a.intro)) ? b : a);
@@ -192,8 +204,8 @@
   }
 
   window.Store = {
-    today, addDays, daysBetween,
-    get: load, save, reset, touch, currentStreak,
+    today, addDays, daysBetween, setClock: (fn) => { clock = fn; },
+    get: load, save, reset, touch, currentStreak, isRest, setPlan, getPlan,
     completeDay, recordAnswer, clearMistake,
     srsIntroduce, srsRate, srsDue, srsMastery,
     exportJSON, exportCode, parseImport, applyImport

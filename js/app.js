@@ -51,10 +51,74 @@
   function scheduleInfo() {
     const st = Store.get();
     if (!st.startDate) return null;
-    const elapsed = Store.daysBetween(st.startDate, Store.today());
-    const expected = Math.min(TOTAL_DAYS, elapsed + 1);
+    const t = Store.today();
+    // расчётный день курса = учебные (не отдых) дни от старта по сегодня
+    let expected = 0;
+    for (let d = st.startDate; d <= t; d = Store.addDays(d, 1)) if (!Store.isRest(d)) expected++;
+    expected = Math.max(1, Math.min(TOTAL_DAYS, expected));
     const done = Object.keys(st.days).length;
-    return { expected, done, diff: done - expected, endDate: Store.addDays(st.startDate, TOTAL_DAYS - 1) };
+    // ожидаемый финиш: день, когда наберётся 60 учебных дней (по плану, дальше — без отдыха)
+    let count = 0, endDate = t, guard = 0;
+    for (let d = st.startDate; guard < 400; d = Store.addDays(d, 1), guard++) { if (!Store.isRest(d)) count++; if (count >= TOTAL_DAYS) { endDate = d; break; } }
+    return { expected, done, diff: done - expected, endDate };
+  }
+
+  // ---- тренировки на выбор для плана недели ----
+  const TRAININGS = {
+    lesson: { label: 'Урок курса', short: 'Урок', icon: '📘', min: '12–18 мин', desc: 'следующий день программы' },
+    cards: { label: 'Карточки', short: 'Карточки', icon: '🃏', min: '5–10 мин', desc: 'повторение по графику 1–3–7–21 и новые слова' },
+    review: { label: 'Слова курса', short: 'Слова', icon: '🔁', min: '5 мин', desc: 'повторение слов из уроков' },
+    mistakes: { label: 'Работа над ошибками', short: 'Ошибки', icon: '🩹', min: '5–10 мин', desc: 'упражнения, где были ошибки' },
+    drill: { label: 'Спряжения', short: 'Глаголы', icon: '⚙️', min: '5 мин', desc: '10 форм из пройденных тем' },
+    write: { label: 'Мини-письмо', short: 'Письмо', icon: '✍️', min: '5–10 мин', desc: 'тема пройденного урока с образцом' },
+    pairs: { label: 'Найди пары', short: 'Пары', icon: '🧩', min: '5 мин', desc: 'пять раундов на словах в изучении' },
+    rest: { label: 'День отдыха', short: 'Отдых', icon: '🌴', min: '', desc: 'серия не прервётся, план сдвинется на день' }
+  };
+  function completedDays() { const st = Store.get(); return Object.keys(st.days).map(Number).filter((d) => !ST_DATA.days[d].review).sort((a, b) => a - b); }
+  function startTraining(type) {
+    const ctx = { toast, startCustomLesson };
+    const st = Store.get();
+    if (type === 'lesson') { const nd = nextDay(); if (nd) location.hash = 'lesson/' + nd; else toast('Курс пройден'); return; }
+    if (type === 'cards') { Cards.session(ctx, true, true); return; }
+    if (type === 'pairs') { Cards.pairsSession(ctx, 'learning', 5); return; }
+    if (type === 'review') {
+      const due = Store.srsDue(); const ids = due.length ? due.slice(0, 20) : pick(Object.keys(st.srs), 10);
+      if (!ids.length) { toast('Слова появятся после первого урока'); return; }
+      startCustomLesson('Слова курса', buildSrsSteps(ids).map((s) => due.length ? s : Object.assign(s, { srs: null }))); return;
+    }
+    if (type === 'mistakes') {
+      const keys = shuffle(Object.keys(st.mistakes)).slice(0, 15);
+      const steps = keys.map((k) => { const ex = findExercise(k); return ex ? { type: 'ex', ex, key: k, day: st.mistakes[k].day } : null; }).filter(Boolean);
+      if (!steps.length) { toast('Ошибок нет: нечего прорешивать'); return; }
+      startCustomLesson('Работа над ошибками', steps); return;
+    }
+    if (type === 'drill') {
+      const days = completedDays(); const src = days.length ? days : [1];
+      const conjs = src.flatMap((d) => (ST_DATA.days[d].exercises || []).filter((e) => e.t === 'conj'));
+      const verbs = [...new Set(conjs.flatMap((e) => e.verbs))]; const tenses = [...new Set(conjs.flatMap((e) => e.tenses))];
+      const steps = expand({ t: 'conj', verbs: verbs.length ? verbs : ['ser', 'tener', 'hacer', 'ir'], tenses: tenses.length ? tenses : ['pres'], n: 10 }).map((e) => ({ type: 'ex', ex: e, key: e.key }));
+      startCustomLesson('Спряжения', steps); return;
+    }
+    if (type === 'write') {
+      const days = completedDays().filter((d) => ST_DATA.extras[d]); const d = days.length ? days[Math.floor(Math.random() * days.length)] : 1;
+      const ex = ST_DATA.extras[d];
+      startCustomLesson('Мини-письмо · день ' + d, [{ type: 'ex', ex: { t: 'write', q: ex.q, sample: ex.sample, hint: 'Тема дня ' + d + ': ' + ST_DATA.days[d].title } }]); return;
+    }
+  }
+  const WD = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'];
+  function weekStart(iso, offsetWeeks) {
+    const d = new Date(iso + 'T00:00:00'); const dow = (d.getDay() + 6) % 7;
+    return Store.addDays(iso, -dow + 7 * (offsetWeeks || 0));
+  }
+  function fmtShort(iso) { const [, m, d] = iso.split('-'); return Number(d) + '.' + m; }
+  function weekStrip(start, onPick, selected) {
+    const st = Store.get(); const t = Store.today();
+    return h('div', { class: 'week' }, Array.from({ length: 7 }, (_, i) => {
+      const date = Store.addDays(start, i); const type = Store.getPlan(date) || 'lesson'; const tr = TRAININGS[type];
+      const active = (st.activity[date] || 0) > 0;
+      const cls = 'wday' + (date === t ? ' today' : '') + (date < t ? ' past' : '') + (type === 'rest' ? ' rest' : '') + (selected === date ? ' sel' : '') + (active ? ' active' : '');
+      return h('button', { type: 'button', class: cls, onclick: () => onPick(date) }, h('span', { class: 'wd' }, WD[i] + ' ' + fmtShort(date)), h('span', { class: 'wi' }, tr.icon), h('span', { class: 'wl' }, tr.short), active ? h('span', { class: 'wdone' }, '✓') : null);
+    }));
   }
 
   // ---- роутер ----
@@ -95,6 +159,16 @@
       )
     ));
 
+    const todayType = Store.getPlan(Store.today()) || 'lesson';
+    frag.append(h('section', { class: 'card' + (todayType === 'rest' ? ' rest-card' : '') },
+      h('div', { class: 'card-kicker' }, 'План недели'),
+      weekStrip(weekStart(Store.today(), 0), () => { location.hash = 'week'; }),
+      todayType === 'rest'
+        ? h('p', null, TRAININGS.rest.icon + ' Сегодня день отдыха. Серия не прервётся, а план сдвинется на день. Если всё же хочется, любая тренировка ниже доступна.')
+        : todayType !== 'lesson'
+          ? h('div', { class: 'row-links' }, h('button', { class: 'btn primary', type: 'button', onclick: () => startTraining(todayType) }, TRAININGS[todayType].icon + ' Сегодня: ' + TRAININGS[todayType].label + ' · ' + TRAININGS[todayType].min), h('a', { class: 'btn ghost', href: '#week' }, 'Изменить план'))
+          : h('div', { class: 'row-links' }, h('a', { class: 'btn ghost', href: '#week' }, 'Выбрать тренировки на неделю'))
+    ));
     if (nd) {
       const d = ST_DATA.days[nd]; const m = moduleOf(nd);
       frag.append(h('section', { class: 'card next' },
@@ -404,6 +478,39 @@
     if (L.wrong.length) foot.append(h('button', { class: 'btn ghost big', type: 'button', onclick: () => startCustomLesson('Работа над ошибками', L.wrong.map((s) => Object.assign({}, s, { srs: null }))) }, 'Прорешать ошибки (' + L.wrong.length + ')'));
     foot.append(h('a', { class: 'btn primary big', href: nd && !L.custom ? '#home' : '#home', onclick: () => { lesson = null; } }, 'На главную'));
   }
+
+  // ================= План недели =================
+  let weekOffset = 0, weekSel = null;
+  routes.week = function () {
+    const t = Store.today();
+    const start = weekStart(t, weekOffset);
+    if (!weekSel || weekSel < start || weekSel > Store.addDays(start, 6)) weekSel = weekOffset === 0 ? t : start;
+    const frag = h('div', { class: 'screen' }, h('h1', null, 'План недели'));
+    frag.append(h('section', { class: 'card' },
+      h('div', { class: 'week-nav' },
+        h('button', { class: 'btn ghost', type: 'button', onclick: () => { weekOffset--; weekSel = null; routes.week(); } }, '‹ пред.'),
+        h('b', null, fmtShort(start) + ' – ' + fmtShort(Store.addDays(start, 6)) + (weekOffset === 0 ? ' · эта неделя' : weekOffset === 1 ? ' · следующая' : '')),
+        h('button', { class: 'btn ghost', type: 'button', onclick: () => { weekOffset++; weekSel = null; routes.week(); } }, 'след. ›')),
+      weekStrip(start, (date) => { weekSel = date; routes.week(); }, weekSel),
+      h('p', { class: 'muted small' }, 'Нажми на день и выбери тренировку или отдых. Без выбора день считается уроком курса. Дни отдыха не прерывают серию и сдвигают расчёт двухмесячного плана.')
+    ));
+    const cur = Store.getPlan(weekSel) || 'lesson';
+    const dowIdx = (new Date(weekSel + 'T00:00:00').getDay() + 6) % 7;
+    frag.append(h('section', { class: 'card' },
+      h('h3', null, WD[dowIdx] + ' ' + fmtShort(weekSel) + (weekSel === t ? ' · сегодня' : '') + ': что делать?'),
+      h('div', { class: 'extras' }, Object.keys(TRAININGS).map((type) => { const tr = TRAININGS[type]; return h('button', { type: 'button', class: 'extra' + (cur === type ? ' chosen' : ''), onclick: () => { Store.setPlan(weekSel, type === 'lesson' ? null : type); routes.week(); } },
+        h('b', null, tr.icon + ' ' + tr.label + (tr.min ? ' · ' + tr.min : '')), h('span', null, tr.desc)); })),
+      weekSel === t && cur !== 'rest' ? h('div', { class: 'row-links' }, h('button', { class: 'btn primary', type: 'button', onclick: () => startTraining(cur) }, 'Начать: ' + TRAININGS[cur].label)) : null
+    ));
+    const applyPreset = (fn) => { for (let i = 0; i < 7; i++) { const d = Store.addDays(start, i); const type = fn(i); Store.setPlan(d, type === 'lesson' ? null : type); } routes.week(); };
+    frag.append(h('section', { class: 'card' }, h('h3', null, 'Быстрые шаблоны на эту неделю'),
+      h('div', { class: 'row-links' },
+        h('button', { class: 'btn', type: 'button', onclick: () => applyPreset(() => 'lesson') }, 'Каждый день урок'),
+        h('button', { class: 'btn', type: 'button', onclick: () => applyPreset((i) => (i >= 5 ? 'rest' : 'lesson')) }, 'Будни урок, выходные отдых'),
+        h('button', { class: 'btn', type: 'button', onclick: () => applyPreset((i) => (i === 6 ? 'rest' : i % 2 ? 'cards' : 'lesson')) }, 'Урок, карточки, урок… и отдых в вс'),
+        h('button', { class: 'btn', type: 'button', onclick: () => applyPreset((i) => (i === 5 ? 'mistakes' : i === 6 ? 'rest' : 'lesson')) }, 'Пн–Пт урок, сб ошибки, вс отдых'))));
+    app.replaceChildren(frag);
+  };
 
   // ================= Карточки =================
   routes.cards = function () {
